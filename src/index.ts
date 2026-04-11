@@ -1,10 +1,12 @@
 import express from "express"
 import dotenv from "dotenv"
-import router from "./routes"
 import database from "./services/database"
+import router from "./routes"
+import { initModels } from "./models"
 
 dotenv.config()
 database.initInstance()
+initModels(database.getInstance()!)
 database.initDB()
 
 const app = express()

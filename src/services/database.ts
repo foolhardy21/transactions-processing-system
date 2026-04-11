@@ -32,9 +32,14 @@ class Database {
             console.log("Error connecting the DB: ", err)
         }
     }
+
+    async createDbTransaction() {
+        if (this.sequelize) {
+            const t = await this.sequelize.transaction()
+            return t
+        }
+    }
 }
 const database = new Database()
 
 export default database
-
-export const sequelize = database.getInstance()
