@@ -14,12 +14,14 @@
   "dependencies": {
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
+    "pg": "^8.20.0",
     "sequelize": "^6.37.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^24.5.2",
     "nodemon": "^3.1.10",
+    "sequelize-cli": "^6.6.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   }

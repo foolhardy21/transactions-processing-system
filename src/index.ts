@@ -1,8 +1,12 @@
 import express from "express"
 import dotenv from "dotenv"
 import router from "./routes"
+import database from "./services/database"
 
 dotenv.config()
+database.initInstance()
+database.initDB()
+
 const app = express()
 
 app.use(express.json())
