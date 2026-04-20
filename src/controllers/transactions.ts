@@ -1,7 +1,7 @@
 import Decimal from "decimal.js"
 import { Request, Response } from "express"
 import database from "../services/database"
-import { createTransaction, getTransactionById } from "../services/transactions"
+import { createTransaction, getLastNAccountTransactions, getTransactionById } from "../services/transactions"
 import ApiError, { TRANSACTION_STATUS, TRANSACTION_TYPES } from "../utils/types"
 import { getAccountById } from "../services/accounts"
 
@@ -9,6 +9,16 @@ export async function handleCreateTransaction(req: Request, res: Response) {
     const { transactionId, accountId, type, amount } = req.body
     const dbTransaction = await database.createDbTransaction()
     try {
+        if (amount > 50000) throw new ApiError(400, "Maximum amount allowed at a time is 50,000.")
+
+        const now = new Date()
+        const lastNTransactions = await getLastNAccountTransactions(5, accountId, dbTransaction)
+        if (lastNTransactions.length) {
+            if (Math.abs(now.getTime() - new Date(lastNTransactions[0].createdAt ?? "").getTime()) < 60_000) {
+                throw new ApiError(403, "Please wait for sometime before trying again.")
+            }
+        }
+
         const transaction = await getTransactionById(transactionId, dbTransaction)
         if (transaction) {
             let status = 409, message = ""
@@ -50,6 +60,8 @@ export async function handleCreateTransaction(req: Request, res: Response) {
         await account!.save({ transaction: dbTransaction })
 
         await dbTransaction!.commit()
+
+        return res.status(201).json({ success: true, message: "Transaction registered successfully." })
     } catch (err: any) {
         await dbTransaction!.rollback()
         throw err

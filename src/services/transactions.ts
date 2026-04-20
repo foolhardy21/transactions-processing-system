@@ -40,3 +40,14 @@ export async function createTransaction({
     )
     return transaction
 }
+
+export async function getLastNAccountTransactions(n: number, accountId: string, t?: SequelizeTransaction): Promise<ITransaction[]> {
+    const transactions = await Transaction.findAll({
+        where: { accountId },
+        order: [["createdAt", "DESC"]],
+        limit: n,
+        lock: true,
+        ...(t && { transaction: t }),
+    })
+    return transactions
+}

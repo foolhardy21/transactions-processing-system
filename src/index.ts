@@ -5,6 +5,7 @@ import router from "./routes"
 import { initModels } from "./models"
 
 dotenv.config()
+
 database.initInstance()
 initModels(database.getInstance()!)
 database.initDB()

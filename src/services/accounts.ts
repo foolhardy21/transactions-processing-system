@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto"
 import { Op, Transaction } from "sequelize";
 import { IAccount } from "../models/account";
 import { Account } from "../models";
@@ -20,4 +21,13 @@ export async function updateAccountBalanceById(accountId: string, newBalance: st
         ...(t && { transaction: t })
     })
     return updatedAccount
+}
+
+export async function createAccount(accountHolderId: string): Promise<IAccount> {
+    const accountHolder = await Account.create({
+        id: randomUUID(),
+        balance: "0",
+        holderId: accountHolderId,
+    })
+    return accountHolder
 }
