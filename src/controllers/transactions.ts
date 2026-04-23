@@ -1,13 +1,17 @@
 import Decimal from "decimal.js"
 import { Request, Response } from "express"
 import database from "../services/database"
+import kafka from "../services/kafka"
 import { createTransaction, getLastNAccountTransactions, getTransactionById } from "../services/transactions"
 import ApiError, { TRANSACTION_STATUS, TRANSACTION_TYPES } from "../utils/types"
 import { getAccountById } from "../services/accounts"
 
 export async function handleCreateTransaction(req: Request, res: Response) {
-    const { transactionId, accountId, type, amount } = req.body
+    const { transactionId, accountId, type, amount, deviceFingerprint, device_fingerprint } = req.body
+    const normalizedDeviceFingerprint = deviceFingerprint ?? device_fingerprint ?? "unknown-device"
+    const ipAddress = req.ip || req.socket.remoteAddress || "unknown-ip"
     const dbTransaction = await database.createDbTransaction()
+    let isCommitted = false
     try {
         if (amount > 50000) throw new ApiError(400, "Maximum amount allowed at a time is 50,000.")
 
@@ -60,10 +64,43 @@ export async function handleCreateTransaction(req: Request, res: Response) {
         await account!.save({ transaction: dbTransaction })
 
         await dbTransaction!.commit()
+        isCommitted = true
+        
+        await kafka.produce("transaction.completed", [
+            {
+                key: transactionId,
+                value: JSON.stringify({
+                    transactionId,
+                    accountId,
+                    type,
+                    amount,
+                    deviceFingerprint: normalizedDeviceFingerprint,
+                    ipAddress,
+                    status: TRANSACTION_STATUS.SUCCESS,
+                    completedAt: new Date().toISOString(),
+                }),
+            },
+        ])
 
         return res.status(201).json({ success: true, message: "Transaction registered successfully." })
     } catch (err: any) {
-        await dbTransaction!.rollback()
+        if (!isCommitted) await dbTransaction!.rollback()
+        await kafka.produce("transaction.blocked", [
+            {
+                key: transactionId,
+                value: JSON.stringify({
+                    transactionId,
+                    accountId,
+                    type,
+                    amount,
+                    deviceFingerprint: normalizedDeviceFingerprint,
+                    ipAddress,
+                    status: TRANSACTION_STATUS.FAIL,
+                    blockedAt: new Date().toISOString(),
+                    reason: err instanceof Error ? err.message : "Transaction blocked",
+                }),
+            },
+        ])
         throw err
     }
 }

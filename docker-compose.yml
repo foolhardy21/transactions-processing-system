@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  kafka:
+    image: apache/kafka:4.1.1
+    container_name: kafka
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+
+  # postgres:
+  #   image: postgres:16
+  #   container_name: postgres
+  #   environment:
+  #     POSTGRES_DB: ${DB_NAME}
+  #     POSTGRES_USER: ${DB_USERNAME}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #   ports:
+  #     - "${DB_PORT}:5432"
+    
