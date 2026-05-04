@@ -1,6 +1,8 @@
 import kafka from "../services/kafka"
+import { updateTransactionStatus } from "../services/transactions"
+import { TRANSACTION_STATUS } from "../utils/types"
 
-type TransactionCompletedEvent = {
+type TransactionRequestedEvent = {
     transactionId: string
     accountId: string
     type: string
@@ -8,7 +10,7 @@ type TransactionCompletedEvent = {
     deviceFingerprint?: string
     ipAddress?: string
     status: string
-    completedAt: string
+    requestedAt: string
 }
 
 type ActivityRecord = {
@@ -28,8 +30,8 @@ function hasMultipleAccounts(records: ActivityRecord[], accountId: string) {
     return new Set(records.map((record) => record.accountId).filter((id) => id !== accountId)).size > 0
 }
 
-async function handleTransactionCompleted(messageValue: string) {
-    const event: TransactionCompletedEvent = JSON.parse(messageValue)
+async function handleTransactionRequested(messageValue: string) {
+    const event: TransactionRequestedEvent = JSON.parse(messageValue)
     const now = Date.now()
 
     const deviceKey = event.deviceFingerprint ?? "unknown-device"
@@ -63,6 +65,19 @@ async function handleTransactionCompleted(messageValue: string) {
     }
 
     if (suspiciousReasons.length) {
+        const reason = suspiciousReasons.join(", ")
+        await updateTransactionStatus(event.transactionId, TRANSACTION_STATUS.FLAGGED, reason)
+        await kafka.produce("transaction.blocked", [
+            {
+                key: event.transactionId,
+                value: JSON.stringify({
+                    ...event,
+                    status: TRANSACTION_STATUS.FLAGGED,
+                    blockedAt: new Date().toISOString(),
+                    reason,
+                }),
+            },
+        ])
         console.log("fraud-analysis-service suspicious transaction pattern detected:", {
             transactionId: event.transactionId,
             accountId: event.accountId,
@@ -73,7 +88,17 @@ async function handleTransactionCompleted(messageValue: string) {
         return
     }
 
-    console.log("fraud-analysis-service processed transaction.completed:", {
+    await kafka.produce("transaction.approved", [
+        {
+            key: event.transactionId,
+            value: JSON.stringify({
+                ...event,
+                approvedAt: new Date().toISOString(),
+            }),
+        },
+    ])
+
+    console.log("fraud-analysis-service approved transaction.requested:", {
         transactionId: event.transactionId,
         accountId: event.accountId,
     })
@@ -82,7 +107,7 @@ async function handleTransactionCompleted(messageValue: string) {
 export async function initFraudAnalysisConsumer() {
     await kafka.initConsumer(
         "fraud-analysis-service",
-        "transaction.completed",
-        handleTransactionCompleted
+        "transaction.requested",
+        handleTransactionRequested
     )
 }

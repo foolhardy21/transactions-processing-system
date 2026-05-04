@@ -2,6 +2,7 @@ import { Op, Transaction as SequelizeTransaction } from "sequelize";
 import { ITransaction } from "../models/transaction";
 import { Transaction } from "../models";
 import { TRANSACTION_STATUS, TRANSACTION_TYPES } from "../utils/types";
+import { buildStatusPayload, publishTransactionStatus } from "./transactionEvents";
 
 export async function getTransactionById(transactionId: string, t?: SequelizeTransaction): Promise<ITransaction | null> {
     const transaction = await Transaction.findOne({
@@ -39,6 +40,29 @@ export async function createTransaction({
         }
     )
     return transaction
+}
+
+export async function updateTransactionStatus(
+    transactionId: string,
+    status: TRANSACTION_STATUS,
+    reason?: string,
+    t?: SequelizeTransaction,
+    shouldPublish: boolean = true
+): Promise<ITransaction> {
+    const transaction = await getTransactionById(transactionId, t)
+    if (!transaction) {
+        throw new Error("Transaction not found.")
+    }
+
+    transaction.status = status
+    const updatedTransaction = await transaction.save({
+        ...(t && { transaction: t })
+    })
+
+    if (shouldPublish) {
+        publishTransactionStatus(buildStatusPayload(transactionId, status, reason))
+    }
+    return updatedTransaction
 }
 
 export async function getLastNAccountTransactions(n: number, accountId: string, t?: SequelizeTransaction): Promise<ITransaction[]> {

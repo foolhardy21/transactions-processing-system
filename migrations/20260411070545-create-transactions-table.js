@@ -29,7 +29,7 @@ module.exports = {
         allowNull: false,
       },
       status: {
-        type: Sequelize.ENUM("pending", "fail", "success"),
+        type: Sequelize.ENUM("pending", "failed", "completed", "flagged", "finalized"),
         defaultValue: "pending"
       },
       created_at: {

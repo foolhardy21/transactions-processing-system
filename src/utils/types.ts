@@ -13,8 +13,10 @@ export enum TRANSACTION_TYPES {
 
 export enum TRANSACTION_STATUS {
     PENDING = "pending",
-    SUCCESS = "success",
-    FAIL = "fail"
+    FAILED = "failed",
+    COMPLETED = "completed",
+    FLAGGED = "flagged",
+    FINALIZED = "finalized",
 }
 
 export default ApiError

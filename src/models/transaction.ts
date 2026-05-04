@@ -9,7 +9,7 @@ type TransactionAttributes = {
     accountId: string;
     type: "debit" | "credit";
     amount: string;
-    status?: "pending" | "fail" | "success";
+    status?: "pending" | "failed" | "completed" | "flagged" | "finalized";
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -19,7 +19,7 @@ type TransactionCreationAttributes = {
     accountId: string;
     type: "debit" | "credit";
     amount: string;
-    status?: "pending" | "fail" | "success";
+    status?: "pending" | "failed" | "completed" | "flagged" | "finalized";
 }
 
 export interface ITransaction extends Model<TransactionAttributes, TransactionCreationAttributes>, TransactionAttributes { }
@@ -53,7 +53,7 @@ export function initTransactionModel(sequelize: Sequelize) {
                 allowNull: false,
             },
             status: {
-                type: DataTypes.ENUM("pending", "fail", "success"),
+                type: DataTypes.ENUM("pending", "failed", "completed", "flagged", "finalized"),
                 defaultValue: "pending"
             },
 
