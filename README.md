@@ -410,8 +410,6 @@ GET /api/v1/audit/accounts/:accountId/replay
 
 ## ER Diagram
 
-![ER Diagram](er.png)
-
 This diagram includes the strict intended relationships. The first two foreign keys are currently enforced by migration. The `transaction_events` relationships are audit links and should be treated as intended foreign-key relationships for the stricter model.
 
 ```mermaid
