@@ -1,6 +1,7 @@
 import Decimal from "decimal.js"
 import database from "../services/database"
 import kafka from "../services/kafka"
+import { recordTransactionEvent } from "../services/auditEvents"
 import { getAccountById } from "../services/accounts"
 import { getLastNAccountTransactions, updateTransactionStatus } from "../services/transactions"
 import { buildStatusPayload, publishTransactionStatus } from "../services/transactionEvents"
@@ -11,6 +12,8 @@ type TransactionApprovedEvent = {
     accountId: string
     type: TRANSACTION_TYPES
     amount: string
+    correlationId?: string
+    causationId?: string
     deviceFingerprint?: string
     ipAddress?: string
     status: string
@@ -41,6 +44,7 @@ async function handleTransactionApproved(messageValue: string) {
 
         const balanceDec = new Decimal(account!.balance)
         const amountDec = new Decimal(event.amount)
+        const balanceBefore = balanceDec.toFixed(2)
 
         if (event.type === TRANSACTION_TYPES.DEBIT && balanceDec.lessThan(amountDec)) {
             throw new ApiError(403, "Balance not sufficient.")
@@ -55,6 +59,27 @@ async function handleTransactionApproved(messageValue: string) {
         account!.balance = updatedBalance
         await account!.save({ transaction: dbTransaction })
         await updateTransactionStatus(event.transactionId, TRANSACTION_STATUS.COMPLETED, undefined, dbTransaction, false)
+        const completedEvent = await recordTransactionEvent(
+            {
+                transactionId: event.transactionId,
+                accountId: event.accountId,
+                eventType: "transaction.completed",
+                correlationId: event.correlationId ?? event.transactionId,
+                causationId: event.causationId ?? null,
+                transactionType: event.type,
+                amount: event.amount,
+                status: TRANSACTION_STATUS.COMPLETED,
+                balanceBefore,
+                balanceAfter: new Decimal(updatedBalance).toFixed(2),
+                payload: {
+                    ...event,
+                    status: TRANSACTION_STATUS.COMPLETED,
+                    balanceBefore,
+                    balanceAfter: new Decimal(updatedBalance).toFixed(2),
+                },
+            },
+            dbTransaction
+        )
 
         await dbTransaction!.commit()
         isCommitted = true
@@ -65,6 +90,8 @@ async function handleTransactionApproved(messageValue: string) {
                 key: event.transactionId,
                 value: JSON.stringify({
                     ...event,
+                    correlationId: event.correlationId ?? event.transactionId,
+                    causationId: completedEvent.id,
                     status: TRANSACTION_STATUS.COMPLETED,
                     completedAt: new Date().toISOString(),
                 }),
@@ -80,11 +107,29 @@ async function handleTransactionApproved(messageValue: string) {
 
         const reason = err instanceof Error ? err.message : "Transaction failed"
         await updateTransactionStatus(event.transactionId, TRANSACTION_STATUS.FAILED, reason)
+        const failedEvent = await recordTransactionEvent({
+            transactionId: event.transactionId,
+            accountId: event.accountId,
+            eventType: "transaction.failed",
+            correlationId: event.correlationId ?? event.transactionId,
+            causationId: event.causationId ?? null,
+            transactionType: event.type,
+            amount: event.amount,
+            status: TRANSACTION_STATUS.FAILED,
+            reason,
+            payload: {
+                ...event,
+                status: TRANSACTION_STATUS.FAILED,
+                reason,
+            },
+        })
         await kafka.produce("transaction.failed", [
             {
                 key: event.transactionId,
                 value: JSON.stringify({
                     ...event,
+                    correlationId: event.correlationId ?? event.transactionId,
+                    causationId: failedEvent.id,
                     status: TRANSACTION_STATUS.FAILED,
                     failedAt: new Date().toISOString(),
                     reason,

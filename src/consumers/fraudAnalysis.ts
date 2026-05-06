@@ -1,12 +1,15 @@
 import kafka from "../services/kafka"
+import { recordTransactionEvent } from "../services/auditEvents"
 import { updateTransactionStatus } from "../services/transactions"
-import { TRANSACTION_STATUS } from "../utils/types"
+import { TRANSACTION_STATUS, TRANSACTION_TYPES } from "../utils/types"
 
 type TransactionRequestedEvent = {
     transactionId: string
     accountId: string
-    type: string
+    type: TRANSACTION_TYPES
     amount: string
+    correlationId?: string
+    causationId?: string
     deviceFingerprint?: string
     ipAddress?: string
     status: string
@@ -67,11 +70,30 @@ async function handleTransactionRequested(messageValue: string) {
     if (suspiciousReasons.length) {
         const reason = suspiciousReasons.join(", ")
         await updateTransactionStatus(event.transactionId, TRANSACTION_STATUS.FLAGGED, reason)
+        const blockedEvent = await recordTransactionEvent({
+            transactionId: event.transactionId,
+            accountId: event.accountId,
+            eventType: "transaction.blocked",
+            correlationId: event.correlationId ?? event.transactionId,
+            causationId: event.causationId ?? null,
+            transactionType: event.type,
+            amount: event.amount,
+            status: TRANSACTION_STATUS.FLAGGED,
+            reason,
+            payload: {
+                ...event,
+                status: TRANSACTION_STATUS.FLAGGED,
+                reason,
+                suspiciousReasons,
+            },
+        })
         await kafka.produce("transaction.blocked", [
             {
                 key: event.transactionId,
                 value: JSON.stringify({
                     ...event,
+                    correlationId: event.correlationId ?? event.transactionId,
+                    causationId: blockedEvent.id,
                     status: TRANSACTION_STATUS.FLAGGED,
                     blockedAt: new Date().toISOString(),
                     reason,
@@ -88,11 +110,28 @@ async function handleTransactionRequested(messageValue: string) {
         return
     }
 
+    const approvedEvent = await recordTransactionEvent({
+        transactionId: event.transactionId,
+        accountId: event.accountId,
+        eventType: "transaction.approved",
+        correlationId: event.correlationId ?? event.transactionId,
+        causationId: event.causationId ?? null,
+        transactionType: event.type,
+        amount: event.amount,
+        status: TRANSACTION_STATUS.PENDING,
+        payload: {
+            ...event,
+            approvedAt: new Date().toISOString(),
+        },
+    })
+
     await kafka.produce("transaction.approved", [
         {
             key: event.transactionId,
             value: JSON.stringify({
                 ...event,
+                correlationId: event.correlationId ?? event.transactionId,
+                causationId: approvedEvent.id,
                 approvedAt: new Date().toISOString(),
             }),
         },

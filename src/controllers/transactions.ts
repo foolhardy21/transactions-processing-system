@@ -11,6 +11,7 @@ import {
     subscribeToTransaction,
     unsubscribeFromTransaction,
 } from "../services/transactionEvents"
+import { recordTransactionEvent } from "../services/auditEvents"
 
 function getDuplicateTransactionMessage(status: string) {
     switch (status) {
@@ -31,6 +32,7 @@ function getDuplicateTransactionMessage(status: string) {
 export async function handleCreateTransaction(req: Request, res: Response) {
     const { transactionId, accountId, type, amount, deviceFingerprint, device_fingerprint } = req.body
     const normalizedDeviceFingerprint = deviceFingerprint ?? device_fingerprint ?? "unknown-device"
+    const correlationId = transactionId
     const ipAddress = req.ip || req.socket.remoteAddress || "unknown-ip"
     const dbTransaction = await database.createDbTransaction()
     let isCommitted = false
@@ -51,6 +53,28 @@ export async function handleCreateTransaction(req: Request, res: Response) {
             dbTransaction
         )
 
+        const requestedEvent = await recordTransactionEvent(
+            {
+                transactionId,
+                accountId,
+                eventType: "transaction.requested",
+                correlationId,
+                transactionType: type,
+                amount,
+                status: TRANSACTION_STATUS.PENDING,
+                payload: {
+                    transactionId,
+                    accountId,
+                    type,
+                    amount,
+                    deviceFingerprint: normalizedDeviceFingerprint,
+                    ipAddress,
+                    status: TRANSACTION_STATUS.PENDING,
+                },
+            },
+            dbTransaction
+        )
+
         await dbTransaction!.commit()
         isCommitted = true
 
@@ -65,6 +89,8 @@ export async function handleCreateTransaction(req: Request, res: Response) {
                     accountId,
                     type,
                     amount,
+                    correlationId,
+                    causationId: requestedEvent.id,
                     deviceFingerprint: normalizedDeviceFingerprint,
                     ipAddress,
                     status: TRANSACTION_STATUS.PENDING,
@@ -73,7 +99,7 @@ export async function handleCreateTransaction(req: Request, res: Response) {
             },
         ])
 
-        return res.status(202).json({ success: true, ...pendingPayload })
+        return res.status(202).json({ success: true, correlationId, causationId: requestedEvent.id, ...pendingPayload })
     } catch (err: any) {
         if (!isCommitted) await dbTransaction!.rollback()
         throw err
