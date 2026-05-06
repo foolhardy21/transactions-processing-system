@@ -21,7 +21,7 @@ type TransactionApprovedEvent = {
     approvedAt: string
 }
 
-async function handleTransactionApproved(messageValue: string) {
+export async function handleTransactionApproved(messageValue: string) {
     const event: TransactionApprovedEvent = JSON.parse(messageValue)
     const dbTransaction = await database.createDbTransaction()
     let isCommitted = false

@@ -23,12 +23,85 @@ type DlqReplayMessage = {
     payload: string
 }
 
+type ConsumerFailurePlanInput = {
+    topic: string
+    sourceTopic?: string
+    groupId: string
+    key?: string
+    payload: string
+    attempt: number
+    maxRetries?: number
+    errorMessage: string
+}
+
+export type ConsumerFailurePlan = {
+    topic: string
+    messages: KafkaMessageInput[]
+    wrapMessage: boolean
+    attempt?: number
+    lastError?: string
+    movedToDlq: boolean
+}
+
 const DEFAULT_MAX_RETRIES = Number(process.env.KAFKA_MAX_RETRIES ?? 3)
 const DEFAULT_RETRY_BASE_MS = Number(process.env.KAFKA_RETRY_BASE_MS ?? 1000)
 const DLQ_SUFFIX = ".dlq"
 
 function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function getDlqTopic(topic: string) {
+    return `${topic}${DLQ_SUFFIX}`
+}
+
+export function buildConsumerFailurePlan({
+    topic,
+    sourceTopic = topic,
+    groupId,
+    key,
+    payload,
+    attempt,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    errorMessage,
+}: ConsumerFailurePlanInput): ConsumerFailurePlan {
+    if (attempt + 1 >= maxRetries) {
+        return {
+            topic: getDlqTopic(topic),
+            messages: [
+                {
+                    key,
+                    value: JSON.stringify({
+                        originalTopic: sourceTopic,
+                        payload,
+                        metadata: {
+                            attempt: attempt + 1,
+                            sourceTopic,
+                            lastError: errorMessage,
+                            failedAt: new Date().toISOString(),
+                            consumerGroup: groupId,
+                        },
+                    }),
+                },
+            ],
+            wrapMessage: false,
+            movedToDlq: true,
+        }
+    }
+
+    return {
+        topic,
+        messages: [
+            {
+                key,
+                value: payload,
+            },
+        ],
+        wrapMessage: true,
+        attempt: attempt + 1,
+        lastError: errorMessage,
+        movedToDlq: false,
+    }
 }
 
 class KafkaUtil {
@@ -53,10 +126,6 @@ class KafkaUtil {
             brokers: [broker]
         })
         return this.client
-    }
-
-    #getDlqTopic(topic: string) {
-        return `${topic}${DLQ_SUFFIX}`
     }
 
     #toEnvelope(topic: string, value: string, attempt: number = 0, lastError?: string): KafkaEnvelope {
@@ -127,36 +196,30 @@ class KafkaUtil {
                         await handler(envelope.payload)
                     } catch (err) {
                         const errorMessage = err instanceof Error ? err.message : "Unknown consumer error"
+                        const failurePlan = buildConsumerFailurePlan({
+                            topic,
+                            sourceTopic: envelope.metadata.sourceTopic,
+                            groupId,
+                            key: message.key?.toString(),
+                            payload: envelope.payload,
+                            attempt,
+                            errorMessage,
+                        })
 
-                        if (attempt + 1 >= DEFAULT_MAX_RETRIES) {
-                            await this.produce(this.#getDlqTopic(topic), [
-                                {
-                                    key: message.key?.toString(),
-                                    value: JSON.stringify({
-                                        originalTopic: envelope.metadata.sourceTopic,
-                                        payload: envelope.payload,
-                                        metadata: {
-                                            ...envelope.metadata,
-                                            attempt: attempt + 1,
-                                            lastError: errorMessage,
-                                            failedAt: new Date().toISOString(),
-                                            consumerGroup: groupId,
-                                        },
-                                    }),
-                                },
-                            ], false)
+                        if (failurePlan.movedToDlq) {
+                            await this.produce(failurePlan.topic, failurePlan.messages, failurePlan.wrapMessage)
                             console.log(`Moved message to DLQ for ${groupId}:`, errorMessage)
                         } else {
-                            const retryAttempt = attempt + 1
                             const delayMs = DEFAULT_RETRY_BASE_MS * 2 ** attempt
                             await sleep(delayMs)
-                            await this.produce(topic, [
-                                {
-                                    key: message.key?.toString(),
-                                    value: envelope.payload,
-                                },
-                            ], false, retryAttempt, errorMessage)
-                            console.log(`Retried message for ${groupId}, attempt ${retryAttempt}:`, errorMessage)
+                            await this.produce(
+                                failurePlan.topic,
+                                failurePlan.messages,
+                                failurePlan.wrapMessage,
+                                failurePlan.attempt,
+                                failurePlan.lastError
+                            )
+                            console.log(`Retried message for ${groupId}, attempt ${failurePlan.attempt}:`, errorMessage)
                         }
                     }
 

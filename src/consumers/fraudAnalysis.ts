@@ -25,6 +25,11 @@ const deviceActivity = new Map<string, ActivityRecord[]>()
 const ipActivity = new Map<string, ActivityRecord[]>()
 const FRAUD_WINDOW_MS = 5 * 60 * 1000
 
+export function resetFraudAnalysisState() {
+    deviceActivity.clear()
+    ipActivity.clear()
+}
+
 function getRecentRecords(records: ActivityRecord[], now: number) {
     return records.filter((record) => now - record.timestamp <= FRAUD_WINDOW_MS)
 }
@@ -33,7 +38,7 @@ function hasMultipleAccounts(records: ActivityRecord[], accountId: string) {
     return new Set(records.map((record) => record.accountId).filter((id) => id !== accountId)).size > 0
 }
 
-async function handleTransactionRequested(messageValue: string) {
+export async function handleTransactionRequested(messageValue: string) {
     const event: TransactionRequestedEvent = JSON.parse(messageValue)
     const now = Date.now()
 

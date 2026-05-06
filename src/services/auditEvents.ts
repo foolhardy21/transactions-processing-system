@@ -98,6 +98,24 @@ export async function getCorrelationEvents(correlationId: string) {
     })
 }
 
+export function calculateRebuiltBalance(events: Pick<ITransactionEvent, "eventType" | "status" | "transactionType" | "amount">[]) {
+    return events.reduce((balance, event) => {
+        if (
+            event.eventType !== "transaction.completed" ||
+            event.status !== TRANSACTION_STATUS.COMPLETED ||
+            !event.transactionType ||
+            !event.amount
+        ) {
+            return balance
+        }
+
+        const amount = new Decimal(event.amount)
+        return event.transactionType === TRANSACTION_TYPES.DEBIT
+            ? balance.minus(amount)
+            : balance.add(amount)
+    }, new Decimal(0))
+}
+
 export async function rebuildAccountBalance(accountId: string, query: EventQuery = {}) {
     const events = await getAccountEvents(accountId, query)
     const ledgerEvents = events.filter(
@@ -108,12 +126,7 @@ export async function rebuildAccountBalance(accountId: string, query: EventQuery
             event.amount,
     )
 
-    const rebuiltBalance = ledgerEvents.reduce((balance, event) => {
-        const amount = new Decimal(event.amount!)
-        return event.transactionType === TRANSACTION_TYPES.DEBIT
-            ? balance.minus(amount)
-            : balance.add(amount)
-    }, new Decimal(0))
+    const rebuiltBalance = calculateRebuiltBalance(ledgerEvents)
 
     const account = await Account.findOne({ where: { id: accountId } })
 
